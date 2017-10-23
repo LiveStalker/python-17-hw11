@@ -10,15 +10,17 @@ import (
 	"bufio"
 	"path/filepath"
 	"compress/gzip"
-	"github.com/bradfitz/gomemcache/memcache"
 	//"strings"
 	//"time"
-	//"./appsinstalled"
+	"strings"
+	"errors"
 	//"github.com/golang/protobuf/proto"
+	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/livestalker/python-17-hw11/appsinstalled"
 )
 
 func main() {
-    memc := make(map[string]string)
+	memc := make(map[string]string)
 	pattern := flag.String("pattern", "", "Files pattern.")
 	idfaOpt := flag.String("idfa", "127.0.0.1:33013", "Memcache for idfa.")
 	gaidOpt := flag.String("gaid", "127.0.0.1:33014", "Memcache for gaid.")
@@ -33,10 +35,10 @@ func main() {
 	if flag.NFlag() == 0 {
 		flag.PrintDefaults()
 	} else {
-        memc["idfa"] = *idfaOpt
-        memc["gaid"] = *gaidOpt
-        memc["adid"] = *adidOpt
-        memc["dvid"] = *dvidOpt
+		memc["idfa"] = *idfaOpt
+		memc["gaid"] = *gaidOpt
+		memc["adid"] = *adidOpt
+		memc["dvid"] = *dvidOpt
 	}
 	runtime.GOMAXPROCS(*workers)
 	start(pattern, &memc)
@@ -47,17 +49,20 @@ func start(pattern *string, memc *map[string]string) {
 	for key, value := range *memc {
 		mClients[key] = memcache.New(value)
 	}
-	files, err := filepath.Glob(*pattern); if err != nil {
+	files, err := filepath.Glob(*pattern)
+	if err != nil {
 		log.Fatal(err)
 	}
 	sort.Strings(files)
 	for _, f := range files {
 		log.Printf("Processing: %s file.", f)
-		fh, err := os.Open(f); if err != nil {
+		fh, err := os.Open(f)
+		if err != nil {
 			log.Printf("File: %s, error: %s", f, err)
 			continue
 		}
-		gz, err := gzip.NewReader(fh); if err != nil {
+		gz, err := gzip.NewReader(fh)
+		if err != nil {
 			log.Println(err)
 			fh.Close()
 			continue
@@ -65,9 +70,20 @@ func start(pattern *string, memc *map[string]string) {
 		scanner := bufio.NewScanner(gz)
 
 		for scanner.Scan() {
-			fmt.Println(scanner.Text())
+			line := scanner.Text()
+			_, err := parse_appsinstalled(line)
+			if err != nil {
+				log.Printf("Line: %s, error: %s", line, err)
+			}
 		}
 		gz.Close()
 		fh.Close()
 	}
+}
+func parse_appsinstalled(line string) (*appsinstalled.UserApps, error) {
+	parts := strings.Split(strings.TrimSpace(line), "\t")
+	if len(parts) != 5 {
+		return nil, errors.New("error in format\n")
+	}
+	return nil, nil
 }

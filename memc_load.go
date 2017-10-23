@@ -3,16 +3,19 @@ package main
 import (
 	"flag"
 	"fmt"
-	//"log"
 	"runtime"
+	"log"
+	"path/filepath"
+	"github.com/bradfitz/gomemcache/memcache"
 	//"strings"
 	//"time"
-	"github.com/golang/protobuf/proto"
+	//"./appsinstalled"
+	//"github.com/golang/protobuf/proto"
 )
 
 func main() {
-    var memc map[string]string
-	pattern := flag.String("pattern", "./data/appsinstalled/*.tsv.gz", "Files pattern.")
+    memc := make(map[string]string)
+	pattern := flag.String("pattern", "", "Files pattern.")
 	idfaOpt := flag.String("idfa", "127.0.0.1:33013", "Memcache for idfa.")
 	gaidOpt := flag.String("gaid", "127.0.0.1:33014", "Memcache for gaid.")
 	adidOpt := flag.String("adid", "127.0.0.1:33015", "Memcache for adid.")
@@ -20,6 +23,9 @@ func main() {
 	workers := flag.Int("workers", runtime.NumCPU(), "Count of forkers.")
 	fmt.Println(*pattern, *idfaOpt, *gaidOpt, *adidOpt, *dvidOpt, *workers)
 	flag.Parse()
+	if *pattern == "" {
+		log.Fatal("Pattern not found in arguments")
+	}
 	if flag.NFlag() == 0 {
 		flag.PrintDefaults()
 	} else {
@@ -28,8 +34,17 @@ func main() {
         memc["adid"] = *adidOpt
         memc["dvid"] = *dvidOpt
 	}
+	start(pattern, &memc)
 }
 
-func start(workers int, pattern string, memc map[string]string) {
+func start(pattern *string, memc *map[string]string) {
+	mClients := make(map[string]*memcache.Client)
+	for key, value := range *memc {
+		mClients[key] = memcache.New(value)
+	}
+	files, err := filepath.Glob(*pattern); if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Print(files)
 	return
 }

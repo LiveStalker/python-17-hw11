@@ -7,6 +7,7 @@ import (
 	"runtime"
 	//"strings"
 	//"time"
+	"github.com/golang/protobuf/proto"
 )
 
 func main() {

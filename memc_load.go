@@ -1,11 +1,15 @@
 package main
 
 import (
+	"os"
 	"flag"
 	"fmt"
 	"runtime"
 	"log"
+	"sort"
+	"bufio"
 	"path/filepath"
+	"compress/gzip"
 	"github.com/bradfitz/gomemcache/memcache"
 	//"strings"
 	//"time"
@@ -34,6 +38,7 @@ func main() {
         memc["adid"] = *adidOpt
         memc["dvid"] = *dvidOpt
 	}
+	runtime.GOMAXPROCS(*workers)
 	start(pattern, &memc)
 }
 
@@ -45,6 +50,24 @@ func start(pattern *string, memc *map[string]string) {
 	files, err := filepath.Glob(*pattern); if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Print(files)
-	return
+	sort.Strings(files)
+	for _, f := range files {
+		log.Printf("Processing: %s file.", f)
+		fh, err := os.Open(f); if err != nil {
+			log.Printf("File: %s, error: %s", f, err)
+			continue
+		}
+		gz, err := gzip.NewReader(fh); if err != nil {
+			log.Println(err)
+			fh.Close()
+			continue
+		}
+		scanner := bufio.NewScanner(gz)
+
+		for scanner.Scan() {
+			fmt.Println(scanner.Text())
+		}
+		gz.Close()
+		fh.Close()
+	}
 }

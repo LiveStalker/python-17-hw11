@@ -10,16 +10,22 @@ import (
 	"bufio"
 	"path/filepath"
 	"compress/gzip"
-	//"strings"
-	//"time"
 	"strings"
 	"errors"
-	//"github.com/golang/protobuf/proto"
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/livestalker/python-17-hw11/appsinstalled"
 	"strconv"
 	"github.com/golang/protobuf/proto"
+	"sync"
+	"sync/atomic"
 )
+
+var NORMAL_ERR_RATE = 0.01
+
+type Task struct {
+	key   string
+	value []byte
+}
 
 func main() {
 	memc := make(map[string]string)
@@ -47,47 +53,83 @@ func main() {
 }
 
 func start(pattern *string, memc *map[string]string) {
-	mClients := make(map[string]*memcache.Client)
-	for key, value := range *memc {
-		mClients[key] = memcache.New(value)
-	}
+	var wg sync.WaitGroup
 	files, err := filepath.Glob(*pattern)
 	if err != nil {
 		log.Fatal(err)
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		log.Printf("Processing: %s file.", f)
-		fh, err := os.Open(f)
-		if err != nil {
-			log.Printf("File: %s, error: %s", f, err)
-			continue
-		}
-		gz, err := gzip.NewReader(fh)
-		if err != nil {
-			log.Println(err)
-			fh.Close()
-			continue
-		}
-		scanner := bufio.NewScanner(gz)
+		wg.Add(1)
+		go handleFile(f, memc, &wg)
+	}
+	wg.Wait()
+}
 
-		for scanner.Scan() {
-			line := scanner.Text()
-			devType, devId, bytes, err := parse_appsinstalled(line)
-			if err != nil {
-				log.Printf("Line: %s, error: %s", line, err)
-			}
+func handleFile(filename string, memc *map[string]string, wg *sync.WaitGroup) {
+	var _processed uint64 = 0
+	var _errors uint64 = 0
+	var doneFlag sync.WaitGroup
+	defer wg.Done()
+	mClients := make(map[string]*memcache.Client)
+	taskCh := make(map[string](chan *Task))
+	for key, value := range *memc {
+		mClients[key] = memcache.New(value)
+		taskCh[key] = make(chan *Task)
+		doneFlag.Add(1)
+		go insertAppsinstalled(mClients[key], taskCh[key], &_processed, &_errors, &doneFlag)
+	}
+	log.Printf("Processing: %s file.", filename)
+	fh, err := os.Open(filename)
+	if err != nil {
+		log.Printf("File: %s, error: %s", filename, err)
+		return
+	}
+	defer fh.Close()
+	gz, err := gzip.NewReader(fh)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer gz.Close()
+	scanner := bufio.NewScanner(gz)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		devType, devId, bytes, err := parseAppsinstalled(line)
+		key := fmt.Sprintf("%s:%s", devType, devId)
+		taskCh[devType] <- &Task{
+			key:   key,
+			value: bytes,
 		}
-		gz.Close()
-		fh.Close()
+		if err != nil {
+			log.Printf("Line: %s, error: %s", line, err)
+		}
+	}
+	for _, value := range taskCh {
+		close(value)
+	}
+	doneFlag.Wait()
+	totalProcessed := atomic.LoadUint64(&_processed)
+	totalErrors := atomic.LoadUint64(&_errors)
+	log.Printf("Total lines %d if file %s.", totalProcessed+totalErrors, filename)
+	if totalProcessed == 0 {
+		log.Printf("File %s did not processsed.", filename)
+		return
+	}
+	errRate := float64(totalErrors) / float64(totalProcessed)
+	if errRate < NORMAL_ERR_RATE {
+		log.Printf("Acceptable error rate (%f). Successfull load file %s.", errRate, filename)
+		err = renameFile(filename)
+		if err != nil {
+			log.Print(err)
+		}
+	} else {
+		log.Printf("High error rate (%f > %f). Failed load file %s.", errRate, NORMAL_ERR_RATE, filename)
 	}
 }
 
-func handle_file(filename string) {
-
-}
-
-func parse_appsinstalled(line string) (string, string, []byte, error) {
+func parseAppsinstalled(line string) (string, string, []byte, error) {
 	var apps []uint32
 	parts := strings.Split(strings.TrimSpace(line), "\t")
 	if len(parts) != 5 {
@@ -111,9 +153,9 @@ func parse_appsinstalled(line string) (string, string, []byte, error) {
 		}
 		apps = append(apps, uint32(app))
 	}
-	ua := appsinstalled.UserApps {
-		Lat: &lat,
-		Lon: &lon,
+	ua := appsinstalled.UserApps{
+		Lat:  &lat,
+		Lon:  &lon,
 		Apps: apps,
 	}
 	bytes, err := proto.Marshal(&ua)
@@ -121,4 +163,22 @@ func parse_appsinstalled(line string) (string, string, []byte, error) {
 		return "", "", nil, errors.New("marshaling error")
 	}
 	return devType, devId, bytes, nil
+}
+
+func insertAppsinstalled(mc *memcache.Client, tasks <-chan *Task, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
+	defer doneFlag.Done()
+	for t := range tasks {
+		err := mc.Set(&memcache.Item{Key: t.key, Value: t.value})
+		if err != nil {
+			log.Println(err)
+			atomic.AddUint64(_errors, 1)
+		} else {
+			atomic.AddUint64(_processed, 1)
+		}
+	}
+}
+
+func renameFile(filename string) error {
+	newFilename := filepath.Dir(filename) + "/." + filepath.Base(filename)
+	return os.Rename(filename, newFilename)
 }

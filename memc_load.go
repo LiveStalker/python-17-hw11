@@ -17,6 +17,7 @@ import (
 	//"github.com/golang/protobuf/proto"
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/livestalker/python-17-hw11/appsinstalled"
+	"strconv"
 )
 
 func main() {
@@ -71,7 +72,8 @@ func start(pattern *string, memc *map[string]string) {
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			_, err := parse_appsinstalled(line)
+			devType, devId, us, err := parse_appsinstalled(line)
+			fmt.Println(devType, devId, lat, lon, apps)
 			if err != nil {
 				log.Printf("Line: %s, error: %s", line, err)
 			}
@@ -80,10 +82,34 @@ func start(pattern *string, memc *map[string]string) {
 		fh.Close()
 	}
 }
-func parse_appsinstalled(line string) (*appsinstalled.UserApps, error) {
+func parse_appsinstalled(line string) (string, string, *appsinstalled.UserApps, error) {
+	var apps []uint32
 	parts := strings.Split(strings.TrimSpace(line), "\t")
 	if len(parts) != 5 {
-		return nil, errors.New("error in format\n")
+		return "", "", nil, errors.New("error in format\n")
 	}
-	return nil, nil
+	devType := parts[0]
+	devId := parts[1]
+	lat, err := strconv.ParseFloat(parts[2], 64)
+	if err != nil {
+		return "", "", nil, errors.New("float parsing error")
+	}
+
+	lon, err := strconv.ParseFloat(parts[3], 64)
+	if err != nil {
+		return "", "", nil, errors.New("float parsing error")
+	}
+	for _, el := range strings.Split(parts[4], ",") {
+		app, err := strconv.ParseUint(el, 10, 32)
+		if err != nil {
+			continue
+		}
+		apps = append(apps, uint32(app))
+	}
+	ua := appsinstalled.UserApps {
+		Lat: &lat,
+		Lon: &lon,
+		Apps: apps,
+	}
+	return devType, devId, &ua, nil
 }

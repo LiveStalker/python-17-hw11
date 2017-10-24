@@ -25,6 +25,11 @@ import (
 
 var NORMAL_ERR_RATE = 0.01
 
+type Task struct {
+	key   string
+	value []byte
+}
+
 func main() {
 	memc := make(map[string]string)
 	pattern := flag.String("pattern", "", "Files pattern.")
@@ -70,8 +75,12 @@ func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
 	var doneFlag sync.WaitGroup
 	defer wg.Done()
 	mClients := make(map[string]*memcache.Client)
+	taskCh := make(map[string](chan *Task))
 	for key, value := range *memc {
 		mClients[key] = memcache.New(value)
+		taskCh[key] = make(chan *Task)
+		doneFlag.Add(1)
+		go insert_appsinstalled(mClients[key], taskCh[key], &_processed, &_errors, &doneFlag)
 	}
 	log.Printf("Processing: %s file.", filename)
 	fh, err := os.Open(filename)
@@ -92,15 +101,21 @@ func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
 		line := scanner.Text()
 		devType, devId, bytes, err := parse_appsinstalled(line)
 		key := fmt.Sprintf("%s:%s", devType, devId)
-		doneFlag.Add(1)
-		go insert_appsinstalled(mClients[devType], key, bytes, &_processed, &_errors, &doneFlag)
+		taskCh[devType] <- &Task{
+			key:   key,
+			value: bytes,
+		}
 		if err != nil {
 			log.Printf("Line: %s, error: %s", line, err)
 		}
 	}
+	for _, value := range taskCh {
+		close(value)
+	}
 	doneFlag.Wait()
 	totalProcessed := atomic.LoadUint64(&_processed)
 	totalErrors := atomic.LoadUint64(&_errors)
+	log.Printf("Total lines %d.", totalProcessed + totalErrors)
 	if totalProcessed == 0 {
 		log.Printf("File %s did not processsed", filename)
 		return
@@ -150,13 +165,14 @@ func parse_appsinstalled(line string) (string, string, []byte, error) {
 	return devType, devId, bytes, nil
 }
 
-func insert_appsinstalled(mc *memcache.Client, key string, bytes []byte, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
+func insert_appsinstalled(mc *memcache.Client, tasks <-chan *Task, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
 	defer doneFlag.Done()
-	err := mc.Set(&memcache.Item{Key: key, Value: bytes})
-	if err != nil {
-		log.Println(err)
-		atomic.AddUint64(_errors, 0)
-		return
+	for t := range tasks {
+		err := mc.Set(&memcache.Item{Key: t.key, Value: t.value})
+		if err != nil {
+			log.Println(err)
+			atomic.AddUint64(_errors, 0)
+		}
+		atomic.AddUint64(_processed, 1)
 	}
-	atomic.AddUint64(_processed, 1)
 }

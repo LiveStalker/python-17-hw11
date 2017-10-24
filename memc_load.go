@@ -10,11 +10,8 @@ import (
 	"bufio"
 	"path/filepath"
 	"compress/gzip"
-	//"strings"
-	//"time"
 	"strings"
 	"errors"
-	//"github.com/golang/protobuf/proto"
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/livestalker/python-17-hw11/appsinstalled"
 	"strconv"
@@ -64,12 +61,12 @@ func start(pattern *string, memc *map[string]string) {
 	sort.Strings(files)
 	for _, f := range files {
 		wg.Add(1)
-		go handle_file(f, memc, &wg)
+		go handleFile(f, memc, &wg)
 	}
 	wg.Wait()
 }
 
-func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
+func handleFile(filename string, memc *map[string]string, wg *sync.WaitGroup) {
 	var _processed uint64 = 0
 	var _errors uint64 = 0
 	var doneFlag sync.WaitGroup
@@ -80,7 +77,7 @@ func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
 		mClients[key] = memcache.New(value)
 		taskCh[key] = make(chan *Task)
 		doneFlag.Add(1)
-		go insert_appsinstalled(mClients[key], taskCh[key], &_processed, &_errors, &doneFlag)
+		go insertAppsinstalled(mClients[key], taskCh[key], &_processed, &_errors, &doneFlag)
 	}
 	log.Printf("Processing: %s file.", filename)
 	fh, err := os.Open(filename)
@@ -99,7 +96,7 @@ func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		devType, devId, bytes, err := parse_appsinstalled(line)
+		devType, devId, bytes, err := parseAppsinstalled(line)
 		key := fmt.Sprintf("%s:%s", devType, devId)
 		taskCh[devType] <- &Task{
 			key:   key,
@@ -115,21 +112,24 @@ func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
 	doneFlag.Wait()
 	totalProcessed := atomic.LoadUint64(&_processed)
 	totalErrors := atomic.LoadUint64(&_errors)
-	log.Printf("Total lines %d.", totalProcessed + totalErrors)
+	log.Printf("Total lines %d if file %s.", totalProcessed+totalErrors, filename)
 	if totalProcessed == 0 {
-		log.Printf("File %s did not processsed", filename)
+		log.Printf("File %s did not processsed.", filename)
 		return
 	}
 	errRate := float64(totalErrors) / float64(totalProcessed)
 	if errRate < NORMAL_ERR_RATE {
-		log.Printf("Acceptable error rate (%f). Successfull load.", errRate)
-		//TODO Rename file
+		log.Printf("Acceptable error rate (%f). Successfull load file %s.", errRate, filename)
+		err = renameFile(filename)
+		if err != nil {
+			log.Print(err)
+		}
 	} else {
-		log.Printf("High error rate (%f > %f). Failed load.", errRate, NORMAL_ERR_RATE)
+		log.Printf("High error rate (%f > %f). Failed load file %s.", errRate, NORMAL_ERR_RATE, filename)
 	}
 }
 
-func parse_appsinstalled(line string) (string, string, []byte, error) {
+func parseAppsinstalled(line string) (string, string, []byte, error) {
 	var apps []uint32
 	parts := strings.Split(strings.TrimSpace(line), "\t")
 	if len(parts) != 5 {
@@ -165,14 +165,20 @@ func parse_appsinstalled(line string) (string, string, []byte, error) {
 	return devType, devId, bytes, nil
 }
 
-func insert_appsinstalled(mc *memcache.Client, tasks <-chan *Task, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
+func insertAppsinstalled(mc *memcache.Client, tasks <-chan *Task, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
 	defer doneFlag.Done()
 	for t := range tasks {
 		err := mc.Set(&memcache.Item{Key: t.key, Value: t.value})
 		if err != nil {
 			log.Println(err)
-			atomic.AddUint64(_errors, 0)
+			atomic.AddUint64(_errors, 1)
+		} else {
+			atomic.AddUint64(_processed, 1)
 		}
-		atomic.AddUint64(_processed, 1)
 	}
+}
+
+func renameFile(filename string) error {
+	newFilename := filepath.Dir(filename) + "/." + filepath.Base(filename)
+	return os.Rename(filename, newFilename)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/livestalker/python-17-hw11/appsinstalled"
 	"strconv"
+	"github.com/golang/protobuf/proto"
 )
 
 func main() {
@@ -72,8 +73,7 @@ func start(pattern *string, memc *map[string]string) {
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			devType, devId, us, err := parse_appsinstalled(line)
-			fmt.Println(devType, devId, lat, lon, apps)
+			devType, devId, bytes, err := parse_appsinstalled(line)
 			if err != nil {
 				log.Printf("Line: %s, error: %s", line, err)
 			}
@@ -82,7 +82,12 @@ func start(pattern *string, memc *map[string]string) {
 		fh.Close()
 	}
 }
-func parse_appsinstalled(line string) (string, string, *appsinstalled.UserApps, error) {
+
+func handle_file(filename string) {
+
+}
+
+func parse_appsinstalled(line string) (string, string, []byte, error) {
 	var apps []uint32
 	parts := strings.Split(strings.TrimSpace(line), "\t")
 	if len(parts) != 5 {
@@ -111,5 +116,9 @@ func parse_appsinstalled(line string) (string, string, *appsinstalled.UserApps, 
 		Lon: &lon,
 		Apps: apps,
 	}
-	return devType, devId, &ua, nil
+	bytes, err := proto.Marshal(&ua)
+	if err != nil {
+		return "", "", nil, errors.New("marshaling error")
+	}
+	return devType, devId, bytes, nil
 }

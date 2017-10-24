@@ -20,7 +20,10 @@ import (
 	"strconv"
 	"github.com/golang/protobuf/proto"
 	"sync"
+	"sync/atomic"
 )
+
+var NORMAL_ERR_RATE = 0.01
 
 func main() {
 	memc := make(map[string]string)
@@ -49,10 +52,6 @@ func main() {
 
 func start(pattern *string, memc *map[string]string) {
 	var wg sync.WaitGroup
-	mClients := make(map[string]*memcache.Client)
-	for key, value := range *memc {
-		mClients[key] = memcache.New(value)
-	}
 	files, err := filepath.Glob(*pattern)
 	if err != nil {
 		log.Fatal(err)
@@ -60,13 +59,20 @@ func start(pattern *string, memc *map[string]string) {
 	sort.Strings(files)
 	for _, f := range files {
 		wg.Add(1)
-		go handle_file(f, &wg)
+		go handle_file(f, memc, &wg)
 	}
 	wg.Wait()
 }
 
-func handle_file(filename string, wg *sync.WaitGroup) {
+func handle_file(filename string, memc *map[string]string, wg *sync.WaitGroup) {
+	var _processed uint64 = 0
+	var _errors uint64 = 0
+	var doneFlag sync.WaitGroup
 	defer wg.Done()
+	mClients := make(map[string]*memcache.Client)
+	for key, value := range *memc {
+		mClients[key] = memcache.New(value)
+	}
 	log.Printf("Processing: %s file.", filename)
 	fh, err := os.Open(filename)
 	if err != nil {
@@ -85,10 +91,26 @@ func handle_file(filename string, wg *sync.WaitGroup) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		devType, devId, bytes, err := parse_appsinstalled(line)
-		fmt.Println(devType, devId, bytes)
+		key := fmt.Sprintf("%s:%s", devType, devId)
+		doneFlag.Add(1)
+		go insert_appsinstalled(mClients[devType], key, bytes, &_processed, &_errors, &doneFlag)
 		if err != nil {
 			log.Printf("Line: %s, error: %s", line, err)
 		}
+	}
+	doneFlag.Wait()
+	totalProcessed := atomic.LoadUint64(&_processed)
+	totalErrors := atomic.LoadUint64(&_errors)
+	if totalProcessed == 0 {
+		log.Printf("File %s did not processsed", filename)
+		return
+	}
+	errRate := float64(totalErrors) / float64(totalProcessed)
+	if errRate < NORMAL_ERR_RATE {
+		log.Printf("Acceptable error rate (%f). Successfull load.", errRate)
+		//TODO Rename file
+	} else {
+		log.Printf("High error rate (%f > %f). Failed load.", errRate, NORMAL_ERR_RATE)
 	}
 }
 
@@ -126,4 +148,15 @@ func parse_appsinstalled(line string) (string, string, []byte, error) {
 		return "", "", nil, errors.New("marshaling error")
 	}
 	return devType, devId, bytes, nil
+}
+
+func insert_appsinstalled(mc *memcache.Client, key string, bytes []byte, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
+	defer doneFlag.Done()
+	err := mc.Set(&memcache.Item{Key: key, Value: bytes})
+	if err != nil {
+		log.Println(err)
+		atomic.AddUint64(_errors, 0)
+		return
+	}
+	atomic.AddUint64(_processed, 1)
 }

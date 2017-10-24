@@ -19,6 +19,7 @@ import (
 	"github.com/livestalker/python-17-hw11/appsinstalled"
 	"strconv"
 	"github.com/golang/protobuf/proto"
+	"sync"
 )
 
 func main() {
@@ -47,6 +48,7 @@ func main() {
 }
 
 func start(pattern *string, memc *map[string]string) {
+	var wg sync.WaitGroup
 	mClients := make(map[string]*memcache.Client)
 	for key, value := range *memc {
 		mClients[key] = memcache.New(value)
@@ -57,34 +59,37 @@ func start(pattern *string, memc *map[string]string) {
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		log.Printf("Processing: %s file.", f)
-		fh, err := os.Open(f)
-		if err != nil {
-			log.Printf("File: %s, error: %s", f, err)
-			continue
-		}
-		gz, err := gzip.NewReader(fh)
-		if err != nil {
-			log.Println(err)
-			fh.Close()
-			continue
-		}
-		scanner := bufio.NewScanner(gz)
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			devType, devId, bytes, err := parse_appsinstalled(line)
-			if err != nil {
-				log.Printf("Line: %s, error: %s", line, err)
-			}
-		}
-		gz.Close()
-		fh.Close()
+		wg.Add(1)
+		go handle_file(f, &wg)
 	}
+	wg.Wait()
 }
 
-func handle_file(filename string) {
+func handle_file(filename string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	log.Printf("Processing: %s file.", filename)
+	fh, err := os.Open(filename)
+	if err != nil {
+		log.Printf("File: %s, error: %s", filename, err)
+		return
+	}
+	defer fh.Close()
+	gz, err := gzip.NewReader(fh)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer gz.Close()
+	scanner := bufio.NewScanner(gz)
 
+	for scanner.Scan() {
+		line := scanner.Text()
+		devType, devId, bytes, err := parse_appsinstalled(line)
+		fmt.Println(devType, devId, bytes)
+		if err != nil {
+			log.Printf("Line: %s, error: %s", line, err)
+		}
+	}
 }
 
 func parse_appsinstalled(line string) (string, string, []byte, error) {
@@ -111,9 +116,9 @@ func parse_appsinstalled(line string) (string, string, []byte, error) {
 		}
 		apps = append(apps, uint32(app))
 	}
-	ua := appsinstalled.UserApps {
-		Lat: &lat,
-		Lon: &lon,
+	ua := appsinstalled.UserApps{
+		Lat:  &lat,
+		Lon:  &lon,
 		Apps: apps,
 	}
 	bytes, err := proto.Marshal(&ua)

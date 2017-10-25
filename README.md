@@ -9,4 +9,6 @@ cd $(go env GOPATH)/src/github.com/livestalker/python-17-hw11
 make getpkgs
 export PATH=$PATH:$(go env GOPATH)/bin
 make genproto
+go install
+python-17-hw11 --pattern './data/appsinstalled/*.tsv.gz'
 ```

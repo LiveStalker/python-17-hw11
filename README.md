@@ -2,6 +2,7 @@
 
 ## Lab configuration ##
 
+```
 processor       : 0
 vendor_id       : GenuineIntel
 model name      : Intel(R) Xeon(R) CPU E5-2660 v2 @ 2.20GHz
@@ -19,6 +20,7 @@ vendor_id       : GenuineIntel
 model name      : Intel(R) Xeon(R) CPU E5-2660 v2 @ 2.20GHz
 
 Mem: 16GB
+```
 
 ## Bootstrap project (Debian) ##
 

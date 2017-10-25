@@ -40,3 +40,5 @@ user    5m55.220s
 sys     3m19.856s
 
 ```
+
+Please compare with python version: https://github.com/LiveStalker/python-17/tree/master/hw9

@@ -14,7 +14,8 @@ getpkgs-proto:
 # Compile protocol buffer description files
 .PHONY: genproto
 genproto: getpkgs-proto
-	protoc --go_out=. *.proto
+	-mkdir appsinstalled 
+	protoc --go_out=./appsinstalled *.proto
 
 .PHONY: run_memcached
 run_memcached:

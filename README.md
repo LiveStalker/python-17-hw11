@@ -1,5 +1,25 @@
 # python-17-hw11 #
 
+## Lab configuration ##
+
+processor       : 0
+vendor_id       : GenuineIntel
+model name      : Intel(R) Xeon(R) CPU E5-2660 v2 @ 2.20GHz
+--
+processor       : 1
+vendor_id       : GenuineIntel
+model name      : Intel(R) Xeon(R) CPU E5-2660 v2 @ 2.20GHz
+--
+processor       : 2
+vendor_id       : GenuineIntel
+model name      : Intel(R) Xeon(R) CPU E5-2660 v2 @ 2.20GHz
+--
+processor       : 3
+vendor_id       : GenuineIntel
+model name      : Intel(R) Xeon(R) CPU E5-2660 v2 @ 2.20GHz
+
+Mem: 16GB
+
 ## Bootstrap project (Debian) ##
 
 ```

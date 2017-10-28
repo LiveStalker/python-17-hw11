@@ -49,14 +49,17 @@ func main() {
 		memc["dvid"] = *dvidOpt
 	}
 	runtime.GOMAXPROCS(*workers)
-	start(pattern, &memc)
+	err := start(pattern, &memc)
+	if err != nil {
+		log.Printf("Error: %s", err)
+	}
 }
 
-func start(pattern *string, memc *map[string]string) {
+func start(pattern *string, memc *map[string]string) (error) {
 	var wg sync.WaitGroup
 	files, err := filepath.Glob(*pattern)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	sort.Strings(files)
 	for _, f := range files {
@@ -64,6 +67,7 @@ func start(pattern *string, memc *map[string]string) {
 		go handleFile(f, memc, &wg)
 	}
 	wg.Wait()
+	return nil
 }
 
 func handleFile(filename string, memc *map[string]string, wg *sync.WaitGroup) {

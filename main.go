@@ -50,13 +50,13 @@ func main() {
 		log.Fatal("Pattern not found in arguments")
 	}
 	runtime.GOMAXPROCS(*workers)
-	err := start(pattern, &memc)
+	err := start(pattern, memc)
 	if err != nil {
 		log.Printf("Error: %s", err)
 	}
 }
 
-func start(pattern *string, memc *map[string]string) (error) {
+func start(pattern *string, memc map[string]string) (error) {
 	var wg sync.WaitGroup
 	files, err := filepath.Glob(*pattern)
 	if err != nil {
@@ -71,14 +71,14 @@ func start(pattern *string, memc *map[string]string) (error) {
 	return nil
 }
 
-func handleFile(filename string, memc *map[string]string, wg *sync.WaitGroup) {
+func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	var _processed uint64 = 0
 	var _errors uint64 = 0
 	var doneFlag sync.WaitGroup
 	defer wg.Done()
 	mClients := make(map[string]*memcache.Client)
 	taskCh := make(map[string](chan *Task))
-	for key, value := range *memc {
+	for key, value := range memc {
 		mClients[key] = memcache.New(value)
 		taskCh[key] = make(chan *Task)
 		doneFlag.Add(1)

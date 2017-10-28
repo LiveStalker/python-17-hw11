@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"github.com/golang/protobuf/proto"
 	"sync"
-	"sync/atomic"
 )
 
 var NORMAL_ERR_RATE = 0.01
@@ -25,6 +24,11 @@ var NORMAL_ERR_RATE = 0.01
 type Task struct {
 	key   string
 	value []byte
+}
+
+type Result struct {
+	processed int
+	errors    int
 }
 
 var memc map[string] string
@@ -72,9 +76,9 @@ func start(pattern *string, memc map[string]string) (error) {
 }
 
 func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
-	var _processed uint64 = 0
-	var _errors uint64 = 0
+	var results = make(chan * Result)
 	var doneFlag sync.WaitGroup
+	var clients int
 	defer wg.Done()
 	mClients := make(map[string]*memcache.Client)
 	taskCh := make(map[string](chan *Task))
@@ -82,7 +86,8 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 		mClients[key] = memcache.New(value)
 		taskCh[key] = make(chan *Task)
 		doneFlag.Add(1)
-		go insertAppsinstalled(mClients[key], taskCh[key], &_processed, &_errors, &doneFlag)
+		go insertAppsinstalled(mClients[key], taskCh[key], results, &doneFlag)
+		clients++
 	}
 	log.Printf("Processing: %s file.", filename)
 	fh, err := os.Open(filename)
@@ -114,9 +119,15 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	for _, value := range taskCh {
 		close(value)
 	}
+	var totalProcessed int
+	var totalErrors int
+	for i := 0; i < clients; i++ {
+		r := <- results
+		totalProcessed += r.processed
+		totalErrors += r.errors
+	}
+	close(results)
 	doneFlag.Wait()
-	totalProcessed := atomic.LoadUint64(&_processed)
-	totalErrors := atomic.LoadUint64(&_errors)
 	log.Printf("Total lines %d if file %s.", totalProcessed+totalErrors, filename)
 	if totalProcessed == 0 {
 		log.Printf("File %s did not processsed.", filename)
@@ -170,16 +181,21 @@ func parseAppsinstalled(line string) (string, string, []byte, error) {
 	return devType, devId, bytes, nil
 }
 
-func insertAppsinstalled(mc *memcache.Client, tasks <-chan *Task, _processed *uint64, _errors *uint64, doneFlag *sync.WaitGroup) {
+func insertAppsinstalled(mc *memcache.Client, tasks <-chan *Task, results chan<- *Result, doneFlag *sync.WaitGroup) {
+	var _errors, _processed int
 	defer doneFlag.Done()
 	for t := range tasks {
 		err := mc.Set(&memcache.Item{Key: t.key, Value: t.value})
 		if err != nil {
 			log.Println(err)
-			atomic.AddUint64(_errors, 1)
+			_errors ++
 		} else {
-			atomic.AddUint64(_processed, 1)
+			_processed ++
 		}
+	}
+	results <- &Result{
+		processed: _processed,
+		errors: _errors,
 	}
 }
 

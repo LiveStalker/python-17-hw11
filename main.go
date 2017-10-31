@@ -87,6 +87,7 @@ func start(pattern *string, memc map[string]string) (error) {
 func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	var results = make(chan * Result)
 	var doneFlag sync.WaitGroup
+	var parserFlag sync.WaitGroup
 	var clients int
 	defer wg.Done()
 	mClients := make(map[string]*memcache.Client)
@@ -115,16 +116,12 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		devType, devId, bytes, err := parseAppsinstalled(line)
-		key := fmt.Sprintf("%s:%s", devType, devId)
-		taskCh[devType] <- &Task{
-			key:   key,
-			value: bytes,
-		}
-		if err != nil {
-			log.Printf("Line: %s, error: %s", line, err)
-		}
+		//
+		parserFlag.Add(1)
+		go parseAppsinstalled(line, taskCh, &parserFlag)
+		//
 	}
+	parserFlag.Wait()
 	for _, value := range taskCh {
 		close(value)
 	}
@@ -154,7 +151,48 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	}
 }
 
-func parseAppsinstalled(line string) (string, string, []byte, error) {
+func parseAppsinstalled(line string, taskCh map[string](chan *Task), parserFlag *sync.WaitGroup) {
+	var apps []uint32
+	defer parserFlag.Done()
+	parts := strings.Split(strings.TrimSpace(line), "\t")
+	if len(parts) != 5 {
+		log.Printf("Line: %s, error: %s", line, "error in format.")
+	}
+	devType := parts[0]
+	devId := parts[1]
+	lat, err := strconv.ParseFloat(parts[2], 64)
+	if err != nil {
+		log.Printf("Line: %s, error: %s", line, "float parsing error.")
+	}
+
+	lon, err := strconv.ParseFloat(parts[3], 64)
+	if err != nil {
+		log.Printf("Line: %s, error: %s", line, "float parsing error.")
+	}
+	for _, el := range strings.Split(parts[4], ",") {
+		app, err := strconv.ParseUint(el, 10, 32)
+		if err != nil {
+			continue
+		}
+		apps = append(apps, uint32(app))
+	}
+	ua := appsinstalled.UserApps{
+		Lat:  &lat,
+		Lon:  &lon,
+		Apps: apps,
+	}
+	bytes, err := proto.Marshal(&ua)
+	if err != nil {
+		log.Printf("Line: %s, error: %s", line, "marshaling error")
+	}
+	key := fmt.Sprintf("%s:%s", devType, devId)
+	taskCh[devType] <- &Task{
+		key:   key,
+		value: bytes,
+	}
+}
+
+func parseAppsinstalled2(line string) (string, string, []byte, error) {
 	var apps []uint32
 	parts := strings.Split(strings.TrimSpace(line), "\t")
 	if len(parts) != 5 {

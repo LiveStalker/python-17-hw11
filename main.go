@@ -46,6 +46,7 @@ func init() {
 }
 
 func main() {
+	var wg sync.WaitGroup
 	flag.Parse()
 	if flag.NFlag() == 0 {
 		flag.PrintDefaults()
@@ -55,9 +56,17 @@ func main() {
 	}
 	runtime.GOMAXPROCS(*workers)
 	err := start(pattern, memc)
+	files, err := filepath.Glob(*pattern)
 	if err != nil {
 		log.Printf("Error: %s", err)
+		os.Exit(1)
 	}
+	sort.Strings(files)
+	for _, f := range files {
+		wg.Add(1)
+		go handleFile(f, memc, &wg)
+	}
+	wg.Wait()
 }
 
 func start(pattern *string, memc map[string]string) (error) {

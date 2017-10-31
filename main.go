@@ -55,7 +55,6 @@ func main() {
 		log.Fatal("Pattern not found in arguments")
 	}
 	runtime.GOMAXPROCS(*workers)
-	err := start(pattern, memc)
 	files, err := filepath.Glob(*pattern)
 	if err != nil {
 		log.Printf("Error: %s", err)
@@ -67,21 +66,6 @@ func main() {
 		go handleFile(f, memc, &wg)
 	}
 	wg.Wait()
-}
-
-func start(pattern *string, memc map[string]string) (error) {
-	var wg sync.WaitGroup
-	files, err := filepath.Glob(*pattern)
-	if err != nil {
-		return err
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		wg.Add(1)
-		go handleFile(f, memc, &wg)
-	}
-	wg.Wait()
-	return nil
 }
 
 func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
@@ -116,10 +100,8 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		//
 		parserFlag.Add(1)
 		go parseAppsinstalled(line, taskCh, &parserFlag)
-		//
 	}
 	parserFlag.Wait()
 	for _, value := range taskCh {

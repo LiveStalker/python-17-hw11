@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"compress/gzip"
 	"strings"
-	"errors"
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/livestalker/python-17-hw11/appsinstalled"
 	"strconv"
@@ -66,6 +65,13 @@ func main() {
 		go handleFile(f, memc, &wg)
 	}
 	wg.Wait()
+	for _, f := range files {
+		renameFile(f)
+		if err != nil {
+			log.Print(err)
+		}
+		log.Printf("Rename %s file.", f)
+	}
 }
 
 func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
@@ -124,10 +130,6 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	errRate := float64(totalErrors) / float64(totalProcessed)
 	if errRate < NORMAL_ERR_RATE {
 		log.Printf("Acceptable error rate (%f). Successfull load file %s.", errRate, filename)
-		err = renameFile(filename)
-		if err != nil {
-			log.Print(err)
-		}
 	} else {
 		log.Printf("High error rate (%f > %f). Failed load file %s.", errRate, NORMAL_ERR_RATE, filename)
 	}
@@ -172,42 +174,6 @@ func parseAppsinstalled(line string, taskCh map[string](chan *Task), parserFlag 
 		key:   key,
 		value: bytes,
 	}
-}
-
-func parseAppsinstalled2(line string) (string, string, []byte, error) {
-	var apps []uint32
-	parts := strings.Split(strings.TrimSpace(line), "\t")
-	if len(parts) != 5 {
-		return "", "", nil, errors.New("error in format\n")
-	}
-	devType := parts[0]
-	devId := parts[1]
-	lat, err := strconv.ParseFloat(parts[2], 64)
-	if err != nil {
-		return "", "", nil, errors.New("float parsing error")
-	}
-
-	lon, err := strconv.ParseFloat(parts[3], 64)
-	if err != nil {
-		return "", "", nil, errors.New("float parsing error")
-	}
-	for _, el := range strings.Split(parts[4], ",") {
-		app, err := strconv.ParseUint(el, 10, 32)
-		if err != nil {
-			continue
-		}
-		apps = append(apps, uint32(app))
-	}
-	ua := appsinstalled.UserApps{
-		Lat:  &lat,
-		Lon:  &lon,
-		Apps: apps,
-	}
-	bytes, err := proto.Marshal(&ua)
-	if err != nil {
-		return "", "", nil, errors.New("marshaling error")
-	}
-	return devType, devId, bytes, nil
 }
 
 func insertAppsinstalled(mc *memcache.Client, tasks <-chan *Task, results chan<- *Result, doneFlag *sync.WaitGroup) {

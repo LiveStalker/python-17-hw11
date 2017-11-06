@@ -75,7 +75,7 @@ func main() {
 }
 
 func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
-	var results = make(chan * Result)
+	var results = make(chan * Result, len(memc))
 	var doneFlag sync.WaitGroup
 	var parserFlag sync.WaitGroup
 	var clients int
@@ -115,13 +115,12 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	}
 	var totalProcessed int
 	var totalErrors int
-	for i := 0; i < clients; i++ {
-		r := <- results
+	doneFlag.Wait()
+	close(results)
+	for r := range results {
 		totalProcessed += r.processed
 		totalErrors += r.errors
 	}
-	close(results)
-	doneFlag.Wait()
 	log.Printf("Total lines %d if file %s.", totalProcessed+totalErrors, filename)
 	if totalProcessed == 0 {
 		log.Printf("File %s did not processsed.", filename)

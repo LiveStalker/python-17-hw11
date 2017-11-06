@@ -33,6 +33,7 @@ type Result struct {
 var memc map[string]string
 var pattern *string
 var workers *int
+var parsers *int
 
 func init() {
 	memc = make(map[string]string)
@@ -41,7 +42,8 @@ func init() {
 	memc["gaid"] = *flag.String("gaid", "127.0.0.1:33014", "Memcache for gaid.")
 	memc["adid"] = *flag.String("adid", "127.0.0.1:33015", "Memcache for adid.")
 	memc["dvid"] = *flag.String("dvid", "127.0.0.1:33016", "Memcache for dvid.")
-	workers = flag.Int("workers", runtime.NumCPU(), "Count of forkers.")
+	workers = flag.Int("workers", runtime.NumCPU(), "Count of workers.")
+	parsers = flag.Int("parsers", 10, "Count of parsers per file.")
 }
 
 func main() {
@@ -62,7 +64,7 @@ func main() {
 	sort.Strings(files)
 	for _, f := range files {
 		wg.Add(1)
-		go handleFile(f, memc, &wg)
+		go handleFile(f, memc, &wg, *parsers)
 	}
 	wg.Wait()
 	for _, f := range files {
@@ -74,12 +76,11 @@ func main() {
 	}
 }
 
-func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
+func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup, parsers int) {
 	var results = make(chan *Result, len(memc))
 	var doneFlag sync.WaitGroup
 	var parserFlag sync.WaitGroup
 	var clients int
-	var lineParserWorkers = 10
 	defer wg.Done()
 	mClients := make(map[string]*memcache.Client)
 	taskCh := make(map[string](chan *Task))
@@ -105,7 +106,8 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	}
 	defer gz.Close()
 	scanner := bufio.NewScanner(gz)
-	for i := 0; i < lineParserWorkers; i++ {
+	log.Printf("Start %d parsers for %s file.", parsers, filename)
+	for i := 0; i < parsers; i++ {
 		parserFlag.Add(1)
 		go parseAppsinstalled(lineCh, taskCh, &parserFlag)
 	}

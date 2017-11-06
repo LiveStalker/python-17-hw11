@@ -30,7 +30,7 @@ type Result struct {
 	errors    int
 }
 
-var memc map[string] string
+var memc map[string]string
 var pattern *string
 var workers *int
 
@@ -75,13 +75,15 @@ func main() {
 }
 
 func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
-	var results = make(chan * Result, len(memc))
+	var results = make(chan *Result, len(memc))
 	var doneFlag sync.WaitGroup
 	var parserFlag sync.WaitGroup
 	var clients int
+	var lineParserWorkers = 10
 	defer wg.Done()
 	mClients := make(map[string]*memcache.Client)
 	taskCh := make(map[string](chan *Task))
+	lineCh := make(chan string)
 	for key, value := range memc {
 		mClients[key] = memcache.New(value)
 		taskCh[key] = make(chan *Task)
@@ -103,12 +105,15 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	}
 	defer gz.Close()
 	scanner := bufio.NewScanner(gz)
-
+	for i := 0; i < lineParserWorkers; i++ {
+		parserFlag.Add(1)
+		go parseAppsinstalled(lineCh, taskCh, &parserFlag)
+	}
 	for scanner.Scan() {
 		line := scanner.Text()
-		parserFlag.Add(1)
-		go parseAppsinstalled(line, taskCh, &parserFlag)
+		lineCh <- line
 	}
+	close(lineCh)
 	parserFlag.Wait()
 	for _, value := range taskCh {
 		close(value)
@@ -134,44 +139,46 @@ func handleFile(filename string, memc map[string]string, wg *sync.WaitGroup) {
 	}
 }
 
-func parseAppsinstalled(line string, taskCh map[string](chan *Task), parserFlag *sync.WaitGroup) {
+func parseAppsinstalled(lineCh <-chan string, taskCh map[string](chan *Task), parserFlag *sync.WaitGroup) {
 	var apps []uint32
 	defer parserFlag.Done()
-	parts := strings.Split(strings.TrimSpace(line), "\t")
-	if len(parts) != 5 {
-		log.Printf("Line: %s, error: %s", line, "error in format.")
-	}
-	devType := parts[0]
-	devId := parts[1]
-	lat, err := strconv.ParseFloat(parts[2], 64)
-	if err != nil {
-		log.Printf("Line: %s, error: %s", line, "float parsing error.")
-	}
-
-	lon, err := strconv.ParseFloat(parts[3], 64)
-	if err != nil {
-		log.Printf("Line: %s, error: %s", line, "float parsing error.")
-	}
-	for _, el := range strings.Split(parts[4], ",") {
-		app, err := strconv.ParseUint(el, 10, 32)
-		if err != nil {
-			continue
+	for line := range lineCh {
+		parts := strings.Split(strings.TrimSpace(line), "\t")
+		if len(parts) != 5 {
+			log.Printf("Line: %s, error: %s", line, "error in format.")
 		}
-		apps = append(apps, uint32(app))
-	}
-	ua := appsinstalled.UserApps{
-		Lat:  &lat,
-		Lon:  &lon,
-		Apps: apps,
-	}
-	bytes, err := proto.Marshal(&ua)
-	if err != nil {
-		log.Printf("Line: %s, error: %s", line, "marshaling error")
-	}
-	key := fmt.Sprintf("%s:%s", devType, devId)
-	taskCh[devType] <- &Task{
-		key:   key,
-		value: bytes,
+		devType := parts[0]
+		devId := parts[1]
+		lat, err := strconv.ParseFloat(parts[2], 64)
+		if err != nil {
+			log.Printf("Line: %s, error: %s", line, "float parsing error.")
+		}
+
+		lon, err := strconv.ParseFloat(parts[3], 64)
+		if err != nil {
+			log.Printf("Line: %s, error: %s", line, "float parsing error.")
+		}
+		for _, el := range strings.Split(parts[4], ",") {
+			app, err := strconv.ParseUint(el, 10, 32)
+			if err != nil {
+				continue
+			}
+			apps = append(apps, uint32(app))
+		}
+		ua := appsinstalled.UserApps{
+			Lat:  &lat,
+			Lon:  &lon,
+			Apps: apps,
+		}
+		bytes, err := proto.Marshal(&ua)
+		if err != nil {
+			log.Printf("Line: %s, error: %s", line, "marshaling error")
+		}
+		key := fmt.Sprintf("%s:%s", devType, devId)
+		taskCh[devType] <- &Task{
+			key:   key,
+			value: bytes,
+		}
 	}
 }
 
@@ -189,7 +196,7 @@ func insertAppsinstalled(mc *memcache.Client, tasks <-chan *Task, results chan<-
 	}
 	results <- &Result{
 		processed: _processed,
-		errors: _errors,
+		errors:    _errors,
 	}
 }
 
